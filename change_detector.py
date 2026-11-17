@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import math
@@ -48,6 +49,7 @@ def build_change_report(
     plan: MatchPlan,
     before_content_column: int,
     after_content_column: int,
+    ignored_column_indices: Collection[int] | None = None,
 ) -> ChangeReport:
     matched_before_rows = [match.before.row_number for match in plan.matches]
     matched_after_rows = [match.after.row_number for match in plan.matches]
@@ -66,6 +68,12 @@ def build_change_report(
         raise AssertionError("匹配结果未能让 Before 和 After 的每条筛选记录恰好出现一次。")
 
     maximum_columns = max(len(before.columns), len(after.columns))
+    ignored = set(ignored_column_indices or ())
+    if any(not isinstance(index, int) or isinstance(index, bool) or index < 0 or index >= maximum_columns
+           for index in ignored):
+        raise ValueError("忽略列索引超出工作表列范围。")
+    if ignored.intersection({before_content_column, after_content_column}):
+        raise ValueError("内容列是语义匹配核心字段，不能忽略。")
     categorized: dict[str, list[tuple[int, ChangeRow]]] = {
         "changed": [], "new": [], "out": [], "still": [],
     }
@@ -81,6 +89,8 @@ def build_change_report(
             right = match.after.values[index] if right_exists else 0
             before_values.append(left)
             after_values.append(right)
+            if index in ignored:
+                continue
             if left_exists != right_exists or not values_equal(left, right):
                 differences.append(index)
         change_type = "changed" if differences else "still"

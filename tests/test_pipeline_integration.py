@@ -7,7 +7,7 @@ from openpyxl import Workbook, load_workbook
 
 from change_detector import build_change_report
 from excel_reader import read_filtered_sheet
-from excel_writer import save_report
+from excel_writer import DIFF_FILL, save_report
 from semantic_matcher import match_records
 
 
@@ -81,6 +81,65 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertEqual("R3", sheet["E4"].value)
             self.assertEqual(2, workbook["Summary"]["B2"].value)
             self.assertEqual(1, workbook["Summary"]["B3"].value)
+
+    def test_ignored_change_is_preserved_in_excel_but_not_highlighted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            before_path = directory / "Before.xlsx"
+            after_path = directory / "After.xlsx"
+            for path, status, interval in (
+                (before_path, "Open", 100),
+                (after_path, "Done", 50),
+            ):
+                workbook = Workbook()
+                sheet = workbook.active
+                sheet.append(["ID", "Item Type", "ObjectText", "Status", "Interval"])
+                sheet.append(["R1", "Requirement", "Same wording", status, interval])
+                workbook.save(path)
+
+            before = read_filtered_sheet(before_path, "Sheet", 1, "Requirement")
+            after = read_filtered_sheet(after_path, "Sheet", 1, "Requirement")
+            plan = match_records(before.records, after.records, 2, embedder=None)
+            report = build_change_report(before, after, plan, 2, 2, ignored_column_indices={4})
+            self.assertEqual("changed", report.rows[0].change_type)
+            self.assertEqual((3,), report.rows[0].changed_column_indices)
+
+            output = directory / "ignored-column-result.xlsx"
+            save_report(output, report, before, after, 2, 2)
+            workbook = load_workbook(output, data_only=True)
+            sheet = workbook["Change_Tracking"]
+            self.assertEqual("Open", sheet.cell(2, 10).value)
+            self.assertEqual("Done", sheet.cell(2, 11).value)
+            self.assertEqual(100, sheet.cell(2, 12).value)
+            self.assertEqual(50, sheet.cell(2, 13).value)
+            self.assertEqual(DIFF_FILL.fgColor.rgb, sheet.cell(2, 10).fill.fgColor.rgb)
+            self.assertEqual(DIFF_FILL.fgColor.rgb, sheet.cell(2, 11).fill.fgColor.rgb)
+            self.assertNotEqual(DIFF_FILL.fgColor.rgb, sheet.cell(2, 12).fill.fgColor.rgb)
+            self.assertNotEqual(DIFF_FILL.fgColor.rgb, sheet.cell(2, 13).fill.fgColor.rgb)
+
+    def test_item_type_filter_still_works_when_type_column_is_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            snapshots = []
+            for name, type_value in (("Before", " Requirement "), ("After", "requirement")):
+                path = directory / f"{name}.xlsx"
+                workbook = Workbook()
+                sheet = workbook.active
+                sheet.append(["ID", "Item Type", "ObjectText", "Status"])
+                sheet.append(["R1", type_value, "Same wording", "Open"])
+                sheet.append(["H1", "Heading", "Chapter title", "Open"])
+                workbook.save(path)
+                snapshots.append(read_filtered_sheet(path, "Sheet", 1, "Requirement"))
+
+            before, after = snapshots
+            self.assertEqual([2], [record.row_number for record in before.records])
+            self.assertEqual([2], [record.row_number for record in after.records])
+            plan = match_records(before.records, after.records, 2, embedder=None)
+            report = build_change_report(before, after, plan, 2, 2, ignored_column_indices={1})
+
+            self.assertEqual(["still"], [row.change_type for row in report.rows])
+            self.assertEqual(" Requirement ", report.rows[0].before_values[1])
+            self.assertEqual("requirement", report.rows[0].after_values[1])
 
 
 if __name__ == "__main__":

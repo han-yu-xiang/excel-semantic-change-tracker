@@ -4,13 +4,80 @@ from models import ColumnInfo, ExcelRecord, WorkbookSnapshot, Match, MatchPlan
 from change_detector import build_change_report, values_equal
 
 
-def snapshot(name, rows):
-    columns = tuple(ColumnInfo(i, chr(65 + i), header) for i, header in enumerate(("ID", "Item Type", "ObjectText", "Status", "Interval")))
+def snapshot(name, rows, headers=("ID", "Item Type", "ObjectText", "Status", "Interval")):
+    columns = tuple(ColumnInfo(i, chr(65 + i), header) for i, header in enumerate(headers))
     records = tuple(ExcelRecord(row, tuple(values)) for row, values in rows)
     return WorkbookSnapshot(name, "Sheet1", columns, records, len(records))
 
 
 class ChangeDetectorTests(unittest.TestCase):
+    def test_empty_ignore_selection_preserves_legacy_report_exactly(self):
+        before = snapshot("Old.xlsx", [(2, ["R1", "Requirement", "same", "Open", 100])])
+        after = snapshot("New.xlsx", [(8, ["R1", "Requirement", "same", "Done", 50])])
+        plan = MatchPlan(matches=[Match(before.records[0], after.records[0], 1.0, "exact")])
+
+        legacy_report = build_change_report(before, after, plan, 2, 2)
+        empty_selection_report = build_change_report(before, after, plan, 2, 2, ignored_column_indices=())
+
+        self.assertEqual(legacy_report, empty_selection_report)
+
+    def test_only_ignored_column_change_is_still_and_keeps_original_values(self):
+        before = snapshot("Old.xlsx", [(2, ["R1", "Requirement", "same", "Open", 100])])
+        after = snapshot("New.xlsx", [(8, ["R1", "Requirement", "same", "Open", 50])])
+        plan = MatchPlan(matches=[Match(before.records[0], after.records[0], 1.0, "exact")])
+
+        report = build_change_report(before, after, plan, 2, 2, ignored_column_indices={4})
+
+        self.assertEqual("still", report.rows[0].change_type)
+        self.assertEqual((), report.rows[0].changed_column_indices)
+        self.assertEqual(("R1", "Requirement", "same", "Open", 100), report.rows[0].before_values)
+        self.assertEqual(("R1", "Requirement", "same", "Open", 50), report.rows[0].after_values)
+
+    def test_ignored_and_tracked_column_changes_only_report_tracked_column(self):
+        before = snapshot("Old.xlsx", [(2, ["R1", "Requirement", "same", "Open", 100])])
+        after = snapshot("New.xlsx", [(8, ["R1", "Requirement", "same", "Done", 50])])
+        plan = MatchPlan(matches=[Match(before.records[0], after.records[0], 1.0, "exact")])
+
+        report = build_change_report(before, after, plan, 2, 2, ignored_column_indices={4})
+
+        self.assertEqual("changed", report.rows[0].change_type)
+        self.assertEqual((3,), report.rows[0].changed_column_indices)
+
+    def test_ignored_column_existing_on_only_one_side_does_not_create_change(self):
+        before = snapshot("Old.xlsx", [(2, ["R1", "Requirement", "same", "Open", 100])])
+        after = snapshot(
+            "New.xlsx",
+            [(8, ["R1", "Requirement", "same", "Open"])],
+            headers=("Identifier", "Category", "Description", "Status"),
+        )
+        plan = MatchPlan(matches=[Match(before.records[0], after.records[0], 1.0, "exact")])
+
+        report = build_change_report(before, after, plan, 2, 2, ignored_column_indices={4})
+
+        self.assertEqual("still", report.rows[0].change_type)
+        self.assertEqual((), report.rows[0].changed_column_indices)
+
+    def test_new_and_out_rows_keep_their_existing_classification_when_columns_are_ignored(self):
+        before = snapshot("Old.xlsx", [(2, ["R1", "Requirement", "deleted", "Open", 100])])
+        after = snapshot("New.xlsx", [(8, ["R2", "Requirement", "added", "Open", 50])])
+        plan = MatchPlan(unmatched_before=list(before.records), unmatched_after=list(after.records))
+
+        report = build_change_report(before, after, plan, 2, 2, ignored_column_indices={1, 3, 4})
+
+        self.assertEqual(["new", "out"], [row.change_type for row in report.rows])
+        self.assertEqual(0, report.rows[0].before_values[4])
+        self.assertEqual(50, report.rows[0].after_values[4])
+        self.assertEqual(100, report.rows[1].before_values[4])
+        self.assertEqual(0, report.rows[1].after_values[4])
+
+    def test_content_column_cannot_be_ignored(self):
+        before = snapshot("Old.xlsx", [(2, ["R1", "Requirement", "same", "Open", 100])])
+        after = snapshot("New.xlsx", [(8, ["R1", "Requirement", "same", "Open", 100])])
+        plan = MatchPlan(matches=[Match(before.records[0], after.records[0], 1.0, "exact")])
+
+        with self.assertRaisesRegex(ValueError, "内容列"):
+            build_change_report(before, after, plan, 2, 2, ignored_column_indices={2})
+
     def test_classifies_field_changes_new_out_and_still_in_required_order(self):
         before = snapshot("Old.xlsx", [
             (2, ["R1", "Requirement", "same", "Open", 100]),

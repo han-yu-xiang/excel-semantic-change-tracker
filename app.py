@@ -10,6 +10,8 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from openpyxl.utils import get_column_letter
+
 from change_detector import build_change_report
 from excel_reader import list_sheet_names, read_filtered_sheet, read_sheet_preview
 from excel_writer import save_report
@@ -24,6 +26,46 @@ class AnalysisBundle:
     plan: MatchPlan
     before_content_column: int
     after_content_column: int
+    ignored_column_indices: frozenset[int]
+
+
+@dataclass(frozen=True)
+class IgnoredColumnOption:
+    index: int
+    label: str
+    disabled: bool
+
+
+def build_ignored_column_options(
+    before: SheetPreview,
+    after: SheetPreview,
+    before_content_column: int | None,
+    after_content_column: int | None,
+) -> tuple[IgnoredColumnOption, ...]:
+    """Describe physical-column pairs and prevent either content column from being ignored."""
+    before_by_index = {column.index: column for column in before.columns}
+    after_by_index = {column.index: column for column in after.columns}
+    maximum_columns = max(len(before.columns), len(after.columns))
+    content_columns = {before_content_column, after_content_column}
+    options = []
+    for index in range(maximum_columns):
+        letter = get_column_letter(index + 1)
+        before_column = before_by_index.get(index)
+        after_column = after_by_index.get(index)
+        before_letter = before_column.letter if before_column and before_column.letter else letter
+        after_letter = after_column.letter if after_column and after_column.letter else letter
+        before_title = before_column.header if before_column and before_column.header else "(无标题)"
+        after_title = after_column.header if after_column and after_column.header else "(无标题)"
+        if before_column is None:
+            before_title = "(无此列)"
+        if after_column is None:
+            after_title = "(无此列)"
+        disabled = index in content_columns
+        label = f"{before_letter}_before · {before_title}   ↔   {after_letter}_after · {after_title}"
+        if disabled:
+            label += "（内容列，不可忽略）"
+        options.append(IgnoredColumnOption(index, label, disabled))
+    return tuple(options)
 
 
 class ChangeTrackerApp(tk.Tk):
@@ -43,6 +85,9 @@ class ChangeTrackerApp(tk.Tk):
         self.content_vars = {"before": tk.StringVar(), "after": tk.StringVar()}
         self.type_vars = {"before": tk.StringVar(), "after": tk.StringVar()}
         self.column_boxes = {"before": {}, "after": {}}
+        self._ignored_column_options: tuple[IgnoredColumnOption, ...] = ()
+        self._ignored_column_vars: dict[int, tk.BooleanVar] = {}
+        self._ignored_column_disabled: dict[int, bool] = {}
         self._busy = False
         self._last_output: Path | None = None
         self._build_ui()
@@ -74,6 +119,7 @@ class ChangeTrackerApp(tk.Tk):
         settings.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
         settings.columnconfigure(1, weight=1)
         settings.columnconfigure(3, weight=1)
+        settings.rowconfigure(4, weight=1)
         self._build_column_settings(settings)
 
         actions = ttk.LabelFrame(body, text="3. 匹配和输出", padding=12)
@@ -122,6 +168,9 @@ class ChangeTrackerApp(tk.Tk):
                 parent, textvariable=self.content_vars[side], state="disabled", width=34
             )
             self.column_boxes[side]["content"].grid(row=1, column=column * 2 + 1, sticky="ew", padx=(6, 18), pady=4)
+            self.column_boxes[side]["content"].bind(
+                "<<ComboboxSelected>>", lambda _event: self._refresh_ignored_columns(preserve=True)
+            )
             ttk.Label(parent, text="Item Type 列").grid(row=2, column=column * 2, sticky="w", pady=4)
             self.column_boxes[side]["type"] = ttk.Combobox(
                 parent, textvariable=self.type_vars[side], state="disabled", width=34
@@ -132,6 +181,101 @@ class ChangeTrackerApp(tk.Tk):
             text="列选项显示 Excel 字母、列编号和标题。字段报告默认按物理列号配对。",
             foreground="#555555",
         ).grid(row=3, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+        ignore_box = ttk.LabelFrame(parent, text="忽略列设置", padding=8)
+        ignore_box.grid(row=4, column=0, columnspan=4, sticky="nsew", pady=(8, 0))
+        ignore_box.columnconfigure(0, weight=1)
+        ignore_box.rowconfigure(1, weight=1)
+        controls = ttk.Frame(ignore_box)
+        controls.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        ttk.Button(controls, text="全选", command=self._select_all_ignored_columns).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(controls, text="清空选择", command=self._clear_ignored_columns).grid(row=0, column=1)
+        ttk.Label(
+            controls,
+            text="内容列用于语义匹配，不能忽略；Item Type 列仍用于筛选。",
+            foreground="#555555",
+        ).grid(row=0, column=2, sticky="w", padx=(12, 0))
+        list_frame = ttk.Frame(ignore_box)
+        list_frame.grid(row=1, column=0, sticky="nsew")
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+        self._ignored_canvas = tk.Canvas(list_frame, height=120, highlightthickness=0)
+        self._ignored_canvas.grid(row=0, column=0, sticky="nsew")
+        self._ignored_scrollbar = ttk.Scrollbar(
+            list_frame, orient="vertical", command=self._ignored_canvas.yview
+        )
+        self._ignored_scrollbar.grid(row=0, column=1, sticky="ns")
+        self._ignored_canvas.configure(yscrollcommand=self._ignored_scrollbar.set)
+        self._ignored_items_frame = ttk.Frame(self._ignored_canvas)
+        self._ignored_items_window = self._ignored_canvas.create_window(
+            (0, 0), window=self._ignored_items_frame, anchor="nw"
+        )
+        self._ignored_items_frame.bind(
+            "<Configure>",
+            lambda _event: self._ignored_canvas.configure(scrollregion=self._ignored_canvas.bbox("all")),
+        )
+        self._ignored_canvas.bind(
+            "<Configure>",
+            lambda event: self._ignored_canvas.itemconfigure(self._ignored_items_window, width=event.width),
+        )
+        self._refresh_ignored_columns(preserve=False)
+
+    def _refresh_ignored_columns(self, preserve: bool = True):
+        selected = self._selected_ignored_column_indices() if preserve else set()
+        for child in self._ignored_items_frame.winfo_children():
+            child.destroy()
+        self._ignored_column_vars = {}
+        self._ignored_column_disabled = {}
+        if self._previews["before"] is None or self._previews["after"] is None:
+            self._ignored_column_options = ()
+            ttk.Label(
+                self._ignored_items_frame,
+                text="请先加载新旧两侧工作表。",
+                foreground="#555555",
+            ).grid(row=0, column=0, sticky="w", padx=4, pady=3)
+            return
+
+        def content_index(side: str) -> int | None:
+            value = self.content_vars[side].get()
+            return self._column_options[side].get(value)
+
+        self._ignored_column_options = build_ignored_column_options(
+            self._previews["before"], self._previews["after"],
+            content_index("before"), content_index("after"),
+        )
+        if not self._ignored_column_options:
+            ttk.Label(
+                self._ignored_items_frame,
+                text="工作表没有可显示的列。",
+                foreground="#555555",
+            ).grid(row=0, column=0, sticky="w", padx=4, pady=3)
+            return
+        for row, option in enumerate(self._ignored_column_options):
+            variable = tk.BooleanVar(master=self, value=option.index in selected and not option.disabled)
+            self._ignored_column_vars[option.index] = variable
+            self._ignored_column_disabled[option.index] = option.disabled
+            checkbox = ttk.Checkbutton(
+                self._ignored_items_frame,
+                text=option.label,
+                variable=variable,
+                state="disabled" if option.disabled else "normal",
+            )
+            checkbox.grid(row=row, column=0, sticky="w", padx=4, pady=1)
+        self._ignored_canvas.configure(scrollregion=self._ignored_canvas.bbox("all"))
+
+    def _selected_ignored_column_indices(self) -> set[int]:
+        return {
+            index for index, variable in self._ignored_column_vars.items()
+            if variable.get() and not self._ignored_column_disabled.get(index, True)
+        }
+
+    def _select_all_ignored_columns(self):
+        for index, variable in self._ignored_column_vars.items():
+            variable.set(not self._ignored_column_disabled.get(index, True))
+
+    def _clear_ignored_columns(self):
+        for variable in self._ignored_column_vars.values():
+            variable.set(False)
 
     def _build_match_settings(self, parent):
         self.filter_var = tk.StringVar(value="Requirement")
@@ -179,6 +323,7 @@ class ChangeTrackerApp(tk.Tk):
             self.column_boxes[side][kind]["values"] = ()
             self.column_boxes[side][kind]["state"] = "disabled"
             (self.content_vars if kind == "content" else self.type_vars)[side].set("")
+        self._refresh_ignored_columns(preserve=False)
         self.output_dir_var.set(str(Path(path).parent))
         self._sheet_generation[side] += 1
         generation = self._sheet_generation[side]
@@ -212,6 +357,14 @@ class ChangeTrackerApp(tk.Tk):
         sheet_name = self.sheet_vars[side].get()
         if not path or not sheet_name:
             return
+        self._previews[side] = None
+        self._column_options[side] = {}
+        for kind in ("content", "type"):
+            self.column_boxes[side][kind]["values"] = ()
+            self.column_boxes[side][kind]["state"] = "disabled"
+            (self.content_vars if kind == "content" else self.type_vars)[side].set("")
+        self.file_info_vars[side].set(f"正在读取工作表 {sheet_name}…")
+        self._refresh_ignored_columns(preserve=False)
         self._sheet_generation[side] += 1
         generation = self._sheet_generation[side]
         self._run_task(
@@ -246,6 +399,7 @@ class ChangeTrackerApp(tk.Tk):
                 variable.set(label)
             elif variable.get() not in options:
                 variable.set("")
+        self._refresh_ignored_columns(preserve=False)
 
     def _recommend_column(self, side: str, kind: str) -> int | None:
         preview = self._previews[side]
@@ -318,6 +472,7 @@ class ChangeTrackerApp(tk.Tk):
                 return
         threshold = float(self.threshold_var.get())
         semantic_enabled = bool(self.semantic_var.get())
+        ignored_column_indices = frozenset(self._selected_ignored_column_indices())
         before_sheet_name = self.sheet_vars["before"].get()
         after_sheet_name = self.sheet_vars["after"].get()
 
@@ -343,7 +498,9 @@ class ChangeTrackerApp(tk.Tk):
                 after_headers=[column.header for column in after_snapshot.columns],
                 progress_callback=report_progress,
             )
-            return AnalysisBundle(before_snapshot, after_snapshot, plan, before_content, after_content)
+            return AnalysisBundle(
+                before_snapshot, after_snapshot, plan, before_content, after_content, ignored_column_indices
+            )
 
         self._run_task("开始筛选并匹配…", analyze, self._analysis_completed)
 
@@ -366,6 +523,7 @@ class ChangeTrackerApp(tk.Tk):
             plan,
             bundle.before_content_column,
             bundle.after_content_column,
+            ignored_column_indices=bundle.ignored_column_indices,
         )
         output_dir_text = self.output_dir_var.get()
         output_dir = Path(output_dir_text) if output_dir_text else Path(bundle.after.path).parent
