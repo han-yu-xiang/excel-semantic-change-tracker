@@ -576,6 +576,7 @@ class ChangeTrackerApp(tk.Tk):
                 bundle.after,
                 bundle.before_content_column,
                 bundle.after_content_column,
+                ignored_column_indices=bundle.ignored_column_indices,
             )
 
         self._run_task("正在生成 Excel 报告…", write_report, lambda path: self._report_saved(path, report))

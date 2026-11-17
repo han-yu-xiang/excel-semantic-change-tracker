@@ -82,7 +82,7 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertEqual(2, workbook["Summary"]["B2"].value)
             self.assertEqual(1, workbook["Summary"]["B3"].value)
 
-    def test_ignored_change_is_preserved_in_excel_but_not_highlighted(self):
+    def test_ignored_column_is_omitted_from_excel_and_tracked_change_is_highlighted(self):
         with tempfile.TemporaryDirectory() as directory:
             directory = Path(directory)
             before_path = directory / "Before.xlsx"
@@ -105,17 +105,17 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertEqual((3,), report.rows[0].changed_column_indices)
 
             output = directory / "ignored-column-result.xlsx"
-            save_report(output, report, before, after, 2, 2)
+            save_report(output, report, before, after, 2, 2, ignored_column_indices={4})
             workbook = load_workbook(output, data_only=True)
             sheet = workbook["Change_Tracking"]
-            self.assertEqual("Open", sheet.cell(2, 10).value)
-            self.assertEqual("Done", sheet.cell(2, 11).value)
-            self.assertEqual(100, sheet.cell(2, 12).value)
-            self.assertEqual(50, sheet.cell(2, 13).value)
-            self.assertEqual(DIFF_FILL.fgColor.rgb, sheet.cell(2, 10).fill.fgColor.rgb)
-            self.assertEqual(DIFF_FILL.fgColor.rgb, sheet.cell(2, 11).fill.fgColor.rgb)
-            self.assertNotEqual(DIFF_FILL.fgColor.rgb, sheet.cell(2, 12).fill.fgColor.rgb)
-            self.assertNotEqual(DIFF_FILL.fgColor.rgb, sheet.cell(2, 13).fill.fgColor.rgb)
+            self.assertEqual(11, sheet.max_column)
+            self.assertEqual("D_Status_before", sheet["J1"].value)
+            self.assertEqual("D_Status_after", sheet["K1"].value)
+            self.assertNotIn("Interval", [cell.value for cell in sheet[1]])
+            self.assertEqual("Open", sheet["J2"].value)
+            self.assertEqual("Done", sheet["K2"].value)
+            self.assertEqual(DIFF_FILL.fgColor.rgb, sheet["J2"].fill.fgColor.rgb)
+            self.assertEqual(DIFF_FILL.fgColor.rgb, sheet["K2"].fill.fgColor.rgb)
 
     def test_item_type_filter_still_works_when_type_column_is_ignored(self):
         with tempfile.TemporaryDirectory() as directory:

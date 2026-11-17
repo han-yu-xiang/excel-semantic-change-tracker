@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,7 @@ def save_report(
     after: WorkbookSnapshot,
     before_content_column: int,
     after_content_column: int,
+    ignored_column_indices: Collection[int] | None = None,
 ) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,8 +50,19 @@ def save_report(
     sheet = workbook.active
     sheet.title = "Change_Tracking"
     maximum_columns = max(len(before.columns), len(after.columns))
+    ignored = set(ignored_column_indices or ())
+    if any(
+        not isinstance(index, int) or isinstance(index, bool) or index < 0 or index >= maximum_columns
+        for index in ignored
+    ):
+        raise ValueError("忽略列索引超出工作表列范围。")
+    visible_column_indices = [index for index in range(maximum_columns) if index not in ignored]
+    output_position_by_index = {
+        physical_index: output_position
+        for output_position, physical_index in enumerate(visible_column_indices)
+    }
     headers = ["Change_Type", "Before_Location", "After_Location"]
-    for index in range(maximum_columns):
+    for index in visible_column_indices:
         headers.extend((_side_header(before, index, "before"), _side_header(after, index, "after")))
     sheet.append(headers)
     for cell in sheet[1]:
@@ -59,7 +72,7 @@ def save_report(
 
     for row_index, item in enumerate(report.rows, start=2):
         values = [item.change_type, item.before_location, item.after_location]
-        for column_index in range(maximum_columns):
+        for column_index in visible_column_indices:
             before_value = item.before_values[column_index] if column_index < len(item.before_values) else 0
             after_value = item.after_values[column_index] if column_index < len(item.after_values) else 0
             values.extend((before_value, after_value))
@@ -70,7 +83,10 @@ def save_report(
             cell.fill = type_fill
             cell.alignment = Alignment(vertical="top", wrap_text=True)
         for physical_index in item.changed_column_indices:
-            before_col = 4 + physical_index * 2
+            output_position = output_position_by_index.get(physical_index)
+            if output_position is None:
+                continue
+            before_col = 4 + output_position * 2
             after_col = before_col + 1
             sheet.cell(row=row_index, column=before_col).fill = DIFF_FILL
             sheet.cell(row=row_index, column=after_col).fill = DIFF_FILL
@@ -83,7 +99,7 @@ def save_report(
     sheet.column_dimensions["A"].width = 14
     sheet.column_dimensions["B"].width = 34
     sheet.column_dimensions["C"].width = 34
-    for index in range(maximum_columns):
+    for index in visible_column_indices:
         source_column = before.columns[index] if index < len(before.columns) else None
         target_column = after.columns[index] if index < len(after.columns) else None
         content_side = (
