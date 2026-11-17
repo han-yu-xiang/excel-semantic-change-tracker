@@ -109,25 +109,24 @@ class ChangeTrackerApp(tk.Tk):
 
         body = ttk.Frame(self, padding=(18, 4, 18, 4))
         body.grid(row=1, column=0, sticky="nsew")
-        body.columnconfigure(0, weight=1)
-        body.rowconfigure(1, weight=1)
+        for column, weight in enumerate((11, 12, 10)):
+            body.columnconfigure(column, weight=weight)
+        body.rowconfigure(0, weight=1)
 
         files_box = ttk.LabelFrame(body, text="1. 选择 Excel 文件和工作表", padding=8)
-        files_box.grid(row=0, column=0, sticky="ew")
+        files_box.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         files_box.columnconfigure(0, weight=1)
-        files_box.columnconfigure(1, weight=1)
         self._build_file_panel(files_box, "before", "旧版本（Before）", 0)
         self._build_file_panel(files_box, "after", "新版本（After）", 1)
 
         settings = ttk.LabelFrame(body, text="2. 指定内容列、Item Type 列和筛选值", padding=8)
-        settings.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        settings.grid(row=0, column=1, sticky="nsew", padx=(0, 8))
         settings.columnconfigure(1, weight=1)
-        settings.columnconfigure(3, weight=1)
-        settings.rowconfigure(4, weight=1)
+        settings.rowconfigure(7, weight=1)
         self._build_column_settings(settings)
 
         actions = ttk.LabelFrame(body, text="3. 匹配和输出", padding=8)
-        actions.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        actions.grid(row=0, column=2, sticky="nsew")
         actions.columnconfigure(1, weight=1)
         self._build_match_settings(actions)
 
@@ -144,8 +143,8 @@ class ChangeTrackerApp(tk.Tk):
         self.open_folder_button.grid(row=0, column=3)
 
     def _build_file_panel(self, parent, side: str, title: str, column: int):
-        frame = ttk.Frame(parent, padding=(0, 2, 12 if column == 0 else 0, 2))
-        frame.grid(row=0, column=column, sticky="nsew")
+        frame = ttk.Frame(parent, padding=(0, 2, 0, 4 if column == 0 else 0))
+        frame.grid(row=column, column=0, sticky="ew")
         frame.columnconfigure(0, weight=1)
         ttk.Label(frame, text=title, font=("Microsoft YaHei UI", 10, "bold")).grid(row=0, column=0, sticky="w")
         self.path_vars[side] = tk.StringVar()
@@ -169,30 +168,35 @@ class ChangeTrackerApp(tk.Tk):
         )
 
     def _build_column_settings(self, parent):
-        ttk.Label(parent, text="旧版本", font=("Microsoft YaHei UI", 9, "bold")).grid(row=0, column=1, sticky="w", pady=(0, 4))
-        ttk.Label(parent, text="新版本", font=("Microsoft YaHei UI", 9, "bold")).grid(row=0, column=3, sticky="w", pady=(0, 4))
-        for column, side in enumerate(("before", "after")):
-            ttk.Label(parent, text="内容列").grid(row=1, column=column * 2, sticky="w", pady=4)
-            self.column_boxes[side]["content"] = ttk.Combobox(
-                parent, textvariable=self.content_vars[side], state="disabled", width=34
+        for group, (side, version) in enumerate((("before", "旧版本"), ("after", "新版本"))):
+            heading_row = group * 3
+            ttk.Label(parent, text=version, font=("Microsoft YaHei UI", 9, "bold")).grid(
+                row=heading_row, column=0, columnspan=2, sticky="w", pady=(4 if group else 0, 0)
             )
-            self.column_boxes[side]["content"].grid(row=1, column=column * 2 + 1, sticky="ew", padx=(6, 18), pady=4)
+            content_row = heading_row + 1
+            ttk.Label(parent, text="内容列").grid(row=content_row, column=0, sticky="w", pady=3)
+            self.column_boxes[side]["content"] = ttk.Combobox(
+                parent, textvariable=self.content_vars[side], state="disabled", width=22
+            )
+            self.column_boxes[side]["content"].grid(row=content_row, column=1, sticky="ew", padx=(6, 0), pady=3)
             self.column_boxes[side]["content"].bind(
                 "<<ComboboxSelected>>", lambda _event: self._refresh_ignored_columns(preserve=True)
             )
-            ttk.Label(parent, text="Item Type 列").grid(row=2, column=column * 2, sticky="w", pady=4)
+            type_row = heading_row + 2
+            ttk.Label(parent, text="Item Type 列").grid(row=type_row, column=0, sticky="w", pady=3)
             self.column_boxes[side]["type"] = ttk.Combobox(
-                parent, textvariable=self.type_vars[side], state="disabled", width=34
+                parent, textvariable=self.type_vars[side], state="disabled", width=22
             )
-            self.column_boxes[side]["type"].grid(row=2, column=column * 2 + 1, sticky="ew", padx=(6, 18), pady=4)
+            self.column_boxes[side]["type"].grid(row=type_row, column=1, sticky="ew", padx=(6, 0), pady=3)
         ttk.Label(
             parent,
             text="列选项显示 Excel 字母、列编号和标题。字段报告默认按物理列号配对。",
             foreground="#555555",
-        ).grid(row=3, column=0, columnspan=4, sticky="w", pady=(6, 0))
+            wraplength=340,
+        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
         ignore_box = ttk.LabelFrame(parent, text="忽略列设置", padding=8)
-        ignore_box.grid(row=4, column=0, columnspan=4, sticky="nsew", pady=(8, 0))
+        ignore_box.grid(row=7, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
         ignore_box.columnconfigure(0, weight=1)
         ignore_box.rowconfigure(1, weight=1)
         controls = ttk.Frame(ignore_box)
@@ -289,27 +293,42 @@ class ChangeTrackerApp(tk.Tk):
     def _build_match_settings(self, parent):
         self.filter_var = tk.StringVar(value="Requirement")
         ttk.Label(parent, text="Item Type 筛选值").grid(row=0, column=0, sticky="w")
-        ttk.Entry(parent, textvariable=self.filter_var, width=26).grid(row=0, column=1, sticky="w", padx=(8, 22))
+        self.filter_entry = ttk.Entry(parent, textvariable=self.filter_var, width=16)
+        self.filter_entry.grid(row=0, column=1, columnspan=2, sticky="ew", padx=(6, 0))
 
         self.semantic_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(parent, text="启用本地语义匹配", variable=self.semantic_var).grid(row=0, column=2, sticky="w")
-        ttk.Label(parent, text="匹配阈值").grid(row=1, column=0, sticky="w", pady=(10, 0))
+        ttk.Checkbutton(parent, text="启用本地语义匹配", variable=self.semantic_var).grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(8, 0)
+        )
+        ttk.Label(parent, text="匹配阈值").grid(row=2, column=0, sticky="w", pady=(8, 0))
         self.threshold_var = tk.DoubleVar(value=DEFAULT_THRESHOLD)
         self.threshold_scale = ttk.Scale(parent, from_=0.50, to=0.95, variable=self.threshold_var, command=self._update_threshold_label)
-        self.threshold_scale.grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(6, 0))
+        self.threshold_scale.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(2, 0))
         self.threshold_label = ttk.Label(parent, text=f"{DEFAULT_THRESHOLD:.2f}")
-        self.threshold_label.grid(row=1, column=1, sticky="e", pady=(6, 0))
-        ttk.Label(parent, text="阈值越高，自动匹配越保守；不确定候选可人工确认。", foreground="#555555").grid(row=1, column=2, sticky="w", pady=(6, 0))
+        self.threshold_label.grid(row=2, column=2, sticky="e", pady=(8, 0))
+        ttk.Label(
+            parent,
+            text="阈值越高，自动匹配越保守；不确定候选可人工确认。",
+            foreground="#555555",
+            wraplength=220,
+        ).grid(row=4, column=0, columnspan=3, sticky="w", pady=(2, 0))
 
-        ttk.Label(parent, text="输出文件夹").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(parent, text="输出文件夹").grid(row=5, column=0, columnspan=3, sticky="w", pady=(10, 0))
         self.output_dir_var = tk.StringVar()
-        ttk.Entry(parent, textvariable=self.output_dir_var, state="readonly").grid(row=2, column=1, sticky="ew", padx=(8, 8), pady=(6, 0))
-        ttk.Button(parent, text="选择…", command=self._choose_output_folder).grid(row=2, column=2, sticky="w", pady=(6, 0))
+        self.output_dir_entry = ttk.Entry(parent, textvariable=self.output_dir_var, state="readonly", width=14)
+        self.output_dir_entry.grid(
+            row=6, column=0, columnspan=2, sticky="ew", padx=(0, 4), pady=(3, 0)
+        )
+        ttk.Button(parent, text="选择…", command=self._choose_output_folder).grid(
+            row=6, column=2, sticky="e", pady=(3, 0)
+        )
 
-        self.run_button = ttk.Button(parent, text="开始分析并生成报告", command=self._start_analysis)
-        self.run_button.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0), ipady=4)
+        self.run_button = ttk.Button(parent, text="开始分析并生成报告", command=self._start_analysis, width=18)
+        self.run_button.grid(row=7, column=0, columnspan=3, sticky="e", pady=(10, 0), ipady=1)
         self.counts_var = tk.StringVar(value="")
-        ttk.Label(parent, textvariable=self.counts_var, font=("Microsoft YaHei UI", 10, "bold"), wraplength=900).grid(row=4, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        ttk.Label(parent, textvariable=self.counts_var, font=("Microsoft YaHei UI", 10, "bold"), wraplength=300).grid(
+            row=8, column=0, columnspan=3, sticky="w", pady=(6, 0)
+        )
 
 
     def _update_threshold_label(self, _value=None):

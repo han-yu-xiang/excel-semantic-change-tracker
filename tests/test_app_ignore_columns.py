@@ -74,6 +74,31 @@ class IgnoredColumnGuiTests(unittest.TestCase):
 
         self.assertGreaterEqual(path_row.winfo_width(), before_panel.winfo_width() - 40)
 
+    def test_main_sections_are_horizontal_and_filter_stays_visible(self):
+        self.app.deiconify()
+        self.app.update()
+        body = self.app.winfo_children()[1]
+        sections = body.winfo_children()
+
+        self.assertEqual(3, len(sections))
+        self.assertEqual([0, 0, 0], [int(section.grid_info()["row"]) for section in sections])
+        self.assertLess(sections[0].winfo_x(), sections[1].winfo_x())
+        self.assertLess(sections[1].winfo_x(), sections[2].winfo_x())
+        self.assertTrue(self.app.filter_entry.winfo_ismapped())
+        self.assertLessEqual(
+            self.app.filter_entry.winfo_y() + self.app.filter_entry.winfo_height(),
+            sections[2].winfo_height(),
+        )
+        self.assertLess(self.app.run_button.winfo_width(), sections[2].winfo_width() - 20)
+
+    def test_output_folder_entry_keeps_readable_width(self):
+        self.app.deiconify()
+        self.app.update()
+        body = self.app.winfo_children()[1]
+        actions = body.winfo_children()[2]
+
+        self.assertGreaterEqual(self.app.output_dir_entry.winfo_width(), actions.winfo_width() // 2)
+
     def test_checklist_defaults_clear_all_and_refreshes_content_column_state(self):
         before = preview("Old.xlsx", ("ID", "Item Type", "ObjectText", "Status", "Interval"))
         after = preview("New.xlsx", ("ID", "Item Type", "Description", "Status", "Interval"))
