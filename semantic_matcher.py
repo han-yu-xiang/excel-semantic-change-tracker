@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-import os
+from pathlib import Path
 import re
 import unicodedata
 from typing import Callable, Protocol, Sequence
@@ -17,6 +17,7 @@ from models import ExcelRecord, Match, MatchCandidate, MatchPlan, ReviewCase, Sc
 
 
 MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+BUNDLED_MODEL_DIR = Path(__file__).resolve().parent / "models" / "paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_THRESHOLD = 0.68
 REVIEW_SCORE_MARGIN = 0.15
 MAX_REVIEW_CANDIDATES = 5
@@ -30,30 +31,37 @@ class Embedder(Protocol):
 
 
 class LocalSentenceEmbedder:
-    """Lazy CPU model wrapper; first tries the Hugging Face cache before downloading."""
+    """Lazy CPU model wrapper that only loads model files already on this computer."""
 
     def __init__(self, progress_callback: Callable[[str], None] | None = None):
         global _model_instance
         if _model_instance is None:
             if progress_callback:
-                progress_callback("正在加载本地多语言语义模型；首次运行可能需要下载模型文件…")
-            os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-            os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+                if BUNDLED_MODEL_DIR.is_dir():
+                    progress_callback("正在加载程序内置的多语言语义模型…")
+                else:
+                    progress_callback("正在检查项目文件夹和本机缓存中的多语言语义模型…")
             try:
                 from sentence_transformers import SentenceTransformer
             except ImportError as exc:
                 raise RuntimeError("缺少 sentence-transformers 依赖，请重新运行 run.bat 安装依赖。") from exc
-            try:
-                _model_instance = SentenceTransformer(MODEL_NAME, device="cpu", local_files_only=True)
-            except Exception:
+            model_sources = []
+            if BUNDLED_MODEL_DIR.is_dir():
+                model_sources.append(str(BUNDLED_MODEL_DIR))
+            model_sources.append(MODEL_NAME)
+
+            last_error = None
+            for source in model_sources:
                 try:
-                    if progress_callback:
-                        progress_callback("本地未找到模型，正在联网下载（之后可离线使用）…")
-                    _model_instance = SentenceTransformer(MODEL_NAME, device="cpu", local_files_only=False)
+                    _model_instance = SentenceTransformer(source, device="cpu", local_files_only=True)
+                    break
                 except Exception as exc:
-                    raise RuntimeError(
-                        "无法加载语义模型。首次使用请联网后重试；也可确认模型已缓存且未损坏。"
-                    ) from exc
+                    last_error = exc
+            else:
+                raise RuntimeError(
+                    "无法加载本地语义模型。请使用完整的 ExcelTracker_Offline.zip（保留 models 文件夹），"
+                    "或确保模型已存在于本机 Hugging Face 缓存中。程序不会联网下载模型。"
+                ) from last_error
         self.model = _model_instance
 
     def encode(self, texts: Sequence[str], **kwargs):
@@ -648,3 +656,4 @@ def apply_review_decisions(plan: MatchPlan, decisions: dict[int, int | None]) ->
         ambiguity_margin=plan.ambiguity_margin,
         rejected_before_rows=tuple(sorted(rejected)),
     )
+

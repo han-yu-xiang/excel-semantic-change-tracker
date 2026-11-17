@@ -40,6 +40,23 @@ if not exist ".venv\Scripts\python.exe" (
     if errorlevel 1 goto :install_failed
 )
 
+".venv\Scripts\python.exe" dependency_check.py
+if errorlevel 1 goto :repair_dependencies
+goto :dependencies_ready
+
+:repair_dependencies
+echo The project environment is incomplete. Repairing required packages...
+".venv\Scripts\python.exe" -m ensurepip --upgrade
+if errorlevel 1 goto :install_failed
+".venv\Scripts\python.exe" -m pip install --upgrade pip
+if errorlevel 1 goto :install_failed
+".venv\Scripts\python.exe" -m pip install -r requirements.txt
+if errorlevel 1 goto :install_failed
+".venv\Scripts\python.exe" dependency_check.py
+if errorlevel 1 goto :install_failed
+
+:dependencies_ready
+
 echo Starting Excel Semantic Change Tracker...
 ".venv\Scripts\python.exe" main.py
 if errorlevel 1 (
@@ -55,3 +72,4 @@ echo.
 echo Dependency installation failed. Check your internet connection and try again.
 pause
 exit /b 1
+
