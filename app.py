@@ -72,8 +72,12 @@ class ChangeTrackerApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Excel 语义变更跟踪工具")
-        self.geometry("1120x820")
-        self.minsize(980, 720)
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        window_width = min(1120, max(640, screen_width - 40))
+        window_height = min(820, max(600, screen_height - 40))
+        self.geometry(f"{window_width}x{window_height}")
+        self.minsize(min(980, window_width), min(720, window_height))
         self._messages: queue.Queue = queue.Queue()
         self._previews: dict[str, SheetPreview | None] = {"before": None, "after": None}
         self._column_options: dict[str, dict[str, int]] = {"before": {}, "after": {}}
@@ -97,37 +101,37 @@ class ChangeTrackerApp(tk.Tk):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        heading = ttk.Frame(self, padding=(18, 14, 18, 6))
+        heading = ttk.Frame(self, padding=(18, 10, 18, 4))
         heading.grid(row=0, column=0, sticky="ew")
         heading.columnconfigure(0, weight=1)
         ttk.Label(heading, text="Excel 语义变更跟踪", font=("Microsoft YaHei UI", 17, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(heading, text="选择新旧版本、设置列和筛选类型，然后生成变更报告。", foreground="#555555").grid(row=1, column=0, sticky="w", pady=(4, 0))
 
-        body = ttk.Frame(self, padding=(18, 8, 18, 8))
+        body = ttk.Frame(self, padding=(18, 4, 18, 4))
         body.grid(row=1, column=0, sticky="nsew")
         body.columnconfigure(0, weight=1)
         body.rowconfigure(1, weight=1)
 
-        files_box = ttk.LabelFrame(body, text="1. 选择 Excel 文件和工作表", padding=12)
+        files_box = ttk.LabelFrame(body, text="1. 选择 Excel 文件和工作表", padding=8)
         files_box.grid(row=0, column=0, sticky="ew")
         files_box.columnconfigure(0, weight=1)
         files_box.columnconfigure(1, weight=1)
         self._build_file_panel(files_box, "before", "旧版本（Before）", 0)
         self._build_file_panel(files_box, "after", "新版本（After）", 1)
 
-        settings = ttk.LabelFrame(body, text="2. 指定内容列、Item Type 列和筛选值", padding=12)
-        settings.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
+        settings = ttk.LabelFrame(body, text="2. 指定内容列、Item Type 列和筛选值", padding=8)
+        settings.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
         settings.columnconfigure(1, weight=1)
         settings.columnconfigure(3, weight=1)
         settings.rowconfigure(4, weight=1)
         self._build_column_settings(settings)
 
-        actions = ttk.LabelFrame(body, text="3. 匹配和输出", padding=12)
-        actions.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        actions = ttk.LabelFrame(body, text="3. 匹配和输出", padding=8)
+        actions.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         actions.columnconfigure(1, weight=1)
         self._build_match_settings(actions)
 
-        footer = ttk.Frame(self, padding=(18, 6, 18, 14))
+        footer = ttk.Frame(self, padding=(18, 4, 18, 8))
         footer.grid(row=2, column=0, sticky="ew")
         footer.columnconfigure(0, weight=1)
         self.status_var = tk.StringVar(value="请选择两份 Excel 文件。")
@@ -151,13 +155,18 @@ class ChangeTrackerApp(tk.Tk):
         entry = ttk.Entry(row, textvariable=self.path_vars[side], state="readonly")
         entry.grid(row=0, column=0, sticky="ew")
         ttk.Button(row, text="浏览…", command=lambda s=side: self._choose_file(s)).grid(row=0, column=1, padx=(6, 0))
-        ttk.Label(frame, text="工作表").grid(row=2, column=0, sticky="w")
+        sheet_row = ttk.Frame(frame)
+        sheet_row.grid(row=2, column=0, sticky="ew", pady=(2, 3))
+        sheet_row.columnconfigure(1, weight=1)
+        ttk.Label(sheet_row, text="工作表").grid(row=0, column=0, sticky="w", padx=(0, 8))
         self.sheet_vars[side] = tk.StringVar()
-        self.sheet_boxes[side] = ttk.Combobox(frame, textvariable=self.sheet_vars[side], state="disabled", width=34)
-        self.sheet_boxes[side].grid(row=3, column=0, sticky="ew", pady=(3, 4))
+        self.sheet_boxes[side] = ttk.Combobox(sheet_row, textvariable=self.sheet_vars[side], state="disabled", width=34)
+        self.sheet_boxes[side].grid(row=0, column=1, sticky="ew")
         self.sheet_boxes[side].bind("<<ComboboxSelected>>", lambda _event, s=side: self._load_selected_sheet(s))
         self.file_info_vars[side] = tk.StringVar(value="尚未加载工作表")
-        ttk.Label(frame, textvariable=self.file_info_vars[side], foreground="#555555", wraplength=460).grid(row=4, column=0, sticky="w")
+        ttk.Label(frame, textvariable=self.file_info_vars[side], foreground="#555555", wraplength=460).grid(
+            row=3, column=0, sticky="w"
+        )
 
     def _build_column_settings(self, parent):
         ttk.Label(parent, text="旧版本", font=("Microsoft YaHei UI", 9, "bold")).grid(row=0, column=1, sticky="w", pady=(0, 4))
@@ -199,7 +208,7 @@ class ChangeTrackerApp(tk.Tk):
         list_frame.grid(row=1, column=0, sticky="nsew")
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
-        self._ignored_canvas = tk.Canvas(list_frame, height=120, highlightthickness=0)
+        self._ignored_canvas = tk.Canvas(list_frame, height=90, highlightthickness=0)
         self._ignored_canvas.grid(row=0, column=0, sticky="nsew")
         self._ignored_scrollbar = ttk.Scrollbar(
             list_frame, orient="vertical", command=self._ignored_canvas.yview
@@ -287,20 +296,20 @@ class ChangeTrackerApp(tk.Tk):
         ttk.Label(parent, text="匹配阈值").grid(row=1, column=0, sticky="w", pady=(10, 0))
         self.threshold_var = tk.DoubleVar(value=DEFAULT_THRESHOLD)
         self.threshold_scale = ttk.Scale(parent, from_=0.50, to=0.95, variable=self.threshold_var, command=self._update_threshold_label)
-        self.threshold_scale.grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(10, 0))
+        self.threshold_scale.grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(6, 0))
         self.threshold_label = ttk.Label(parent, text=f"{DEFAULT_THRESHOLD:.2f}")
-        self.threshold_label.grid(row=1, column=1, sticky="e", pady=(10, 0))
-        ttk.Label(parent, text="阈值越高，自动匹配越保守；不确定候选可人工确认。", foreground="#555555").grid(row=1, column=2, sticky="w", pady=(10, 0))
+        self.threshold_label.grid(row=1, column=1, sticky="e", pady=(6, 0))
+        ttk.Label(parent, text="阈值越高，自动匹配越保守；不确定候选可人工确认。", foreground="#555555").grid(row=1, column=2, sticky="w", pady=(6, 0))
 
-        ttk.Label(parent, text="输出文件夹").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(parent, text="输出文件夹").grid(row=2, column=0, sticky="w", pady=(6, 0))
         self.output_dir_var = tk.StringVar()
-        ttk.Entry(parent, textvariable=self.output_dir_var, state="readonly").grid(row=2, column=1, sticky="ew", padx=(8, 8), pady=(10, 0))
-        ttk.Button(parent, text="选择…", command=self._choose_output_folder).grid(row=2, column=2, sticky="w", pady=(10, 0))
+        ttk.Entry(parent, textvariable=self.output_dir_var, state="readonly").grid(row=2, column=1, sticky="ew", padx=(8, 8), pady=(6, 0))
+        ttk.Button(parent, text="选择…", command=self._choose_output_folder).grid(row=2, column=2, sticky="w", pady=(6, 0))
 
         self.run_button = ttk.Button(parent, text="开始分析并生成报告", command=self._start_analysis)
-        self.run_button.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(14, 0), ipady=4)
+        self.run_button.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0), ipady=4)
         self.counts_var = tk.StringVar(value="")
-        ttk.Label(parent, textvariable=self.counts_var, font=("Microsoft YaHei UI", 10, "bold"), wraplength=900).grid(row=4, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Label(parent, textvariable=self.counts_var, font=("Microsoft YaHei UI", 10, "bold"), wraplength=900).grid(row=4, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
 
     def _update_threshold_label(self, _value=None):

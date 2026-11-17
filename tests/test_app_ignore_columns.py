@@ -46,7 +46,33 @@ class IgnoredColumnGuiTests(unittest.TestCase):
         except tk.TclError as exc:
             self.skipTest(f"Tk cannot initialize in this environment: {exc}")
         self.app.withdraw()
-        self.addCleanup(self.app.destroy)
+        self.addCleanup(self._destroy_app)
+
+    def _destroy_app(self):
+        for callback_id in self.app.tk.call("after", "info"):
+            self.app.after_cancel(callback_id)
+        self.app.destroy()
+
+    def test_content_settings_receive_their_requested_height(self):
+        self.app.deiconify()
+        self.app.update()
+        body = self.app.winfo_children()[1]
+        settings = next(
+            child for child in body.winfo_children()
+            if child.winfo_class() == "TLabelframe" and child.cget("text").startswith("2.")
+        )
+
+        self.assertGreaterEqual(settings.winfo_height(), settings.winfo_reqheight())
+
+    def test_file_path_row_keeps_the_full_side_panel_width(self):
+        self.app.deiconify()
+        self.app.update()
+        body = self.app.winfo_children()[1]
+        files_box = body.winfo_children()[0]
+        before_panel = files_box.winfo_children()[0]
+        path_row = before_panel.winfo_children()[1]
+
+        self.assertGreaterEqual(path_row.winfo_width(), before_panel.winfo_width() - 40)
 
     def test_checklist_defaults_clear_all_and_refreshes_content_column_state(self):
         before = preview("Old.xlsx", ("ID", "Item Type", "ObjectText", "Status", "Interval"))
