@@ -17,12 +17,11 @@ SUPPORTED_SUFFIXES = {".xlsx", ".xlsm"}
 def _open_workbook(path: str | Path):
     workbook_path = Path(path)
     if workbook_path.suffix.casefold() not in SUPPORTED_SUFFIXES:
-        raise ValueError("只支持 .xlsx 和 .xlsm 文件。")
+        raise ValueError("ֻ֧�� .xlsx �� .xlsm �ļ���")
     return load_workbook(
         workbook_path,
         read_only=True,
         data_only=False,
-        keep_vba=workbook_path.suffix.casefold() == ".xlsm",
     )
 
 
@@ -38,7 +37,7 @@ def read_sheet_preview(path: str | Path, sheet_name: str) -> SheetPreview:
     workbook = _open_workbook(path)
     try:
         if sheet_name not in workbook.sheetnames:
-            raise ValueError(f"工作表不存在：{sheet_name}")
+            raise ValueError(f"�����������ڣ�{sheet_name}")
         sheet = workbook[sheet_name]
         header_values = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), ())
         columns = tuple(
@@ -68,7 +67,7 @@ def read_filtered_sheet(
     """
     preview = read_sheet_preview(path, sheet_name)
     if item_type_column < 0 or item_type_column >= len(preview.columns):
-        raise ValueError("Item Type 列选择超出工作表列范围。")
+        raise ValueError("Item Type ��ѡ�񳬳��������з�Χ��")
 
     workbook = _open_workbook(path)
     expected = _normalized_filter(filter_value)
